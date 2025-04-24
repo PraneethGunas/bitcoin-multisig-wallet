@@ -24,7 +24,7 @@ cargo build --release
 
 ### Generate a new key pair
 ```bash
-./target/release/bitcoin-multisig-wallet generate-key --network testnet --index 0
+./target/release/bitcoin-multisig-wallet generate-key --network testnet
 ```
 
 ### List all generated keys
@@ -34,17 +34,17 @@ cargo build --release
 
 ### Create a new wallet
 ```bash
-./target/release/bitcoin-multisig-wallet create --xpubs "xpub1,xpub2,xpub3" --threshold 2 --network testnet
+./target/release/bitcoin-multisig-wallet create-wallet --network testnet --threshold 2 --xpubs <xpub1> <xpub2> <xpub3>
 ```
 
 ### Get a new address
 ```bash
-./target/release/bitcoin-multisig-wallet get-address --wallet ~/.bitcoin-multisig/wallet.json
+./target/release/bitcoin-multisig-wallet get-address --wallet wallet.json
 ```
 
-### Check balance
+### Get wallet balance
 ```bash
-./target/release/bitcoin-multisig-wallet get-balance --wallet ~/.bitcoin-multisig/wallet.json
+./target/release/bitcoin-multisig-wallet get-balance --wallet wallet.json
 ```
 
 ## Network Support

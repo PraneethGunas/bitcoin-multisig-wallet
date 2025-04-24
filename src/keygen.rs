@@ -1,8 +1,8 @@
 use anyhow::Result;
-use bdk::bitcoin::{
+use bitcoin::{
     Network,
-    util::bip32::{ExtendedPrivKey, ExtendedPubKey, DerivationPath},
     secp256k1::{Secp256k1, rand::{self, RngCore}},
+    bip32::{ExtendedPrivKey, ExtendedPubKey, DerivationPath},
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
