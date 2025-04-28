@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bdk_chain = "0.5"
+bdk_chain = "0.21.1"
 bdk_file_store = "0.5"
 bdk_wallet = "1.2.0"
 bitcoin = { version = "0.30.1", features = ["rand"] }
+secp256k1 = { version = "0.27", features = ["rand", "bitcoin_hashes"] }
+sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4.4", features = ["derive"] }
