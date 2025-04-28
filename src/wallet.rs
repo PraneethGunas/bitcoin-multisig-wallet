@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use bdk_chain::spk_client::{FullScanRequestBuilder, FullScanResponse, SyncRequestBuilder, SyncResponse};
 use bitcoin::{
     Network,
     Address,
@@ -14,6 +15,11 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::path::PathBuf;
 use std::fs;
+use esplora_client::Builder;
+use bdk_esplora::{esplora_client, EsploraExt};
+
+const STOP_GAP: usize = 50;
+const PARALLEL_REQUESTS: usize = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MultisigWallet {
@@ -115,8 +121,32 @@ impl MultisigWallet {
         Ok(unchecked.require_network(self.network)?)
     }
 
+    pub fn sync_wallet(&self) -> Result<(Wallet)> {
+        let mut wallet = self.create_wallet()?;
+        // Create the Esplora client
+        let client: esplora_client::BlockingClient = Builder::new("https://blockstream.info/testnet/api/").build_blocking();
+        // Full scan the wallet
+        let full_scan_request: FullScanRequestBuilder<KeychainKind> = wallet.start_full_scan();
+        let full_scan_response: FullScanResponse<KeychainKind> =
+            client.full_scan(full_scan_request, STOP_GAP, PARALLEL_REQUESTS)?;
+
+        // Apply the full scan response to the wallet
+        wallet.apply_update(full_scan_response)?;
+
+        // Sync the wallet
+        let sync_request: SyncRequestBuilder<(KeychainKind, u32)> =
+            wallet.start_sync_with_revealed_spks();
+
+        let sync_response: SyncResponse = client.sync(sync_request, PARALLEL_REQUESTS)?;
+
+        // Apply the sync response to the wallet
+        wallet.apply_update(sync_response)?;
+        Ok(wallet)
+    }
+
     pub fn get_balance(&self) -> Result<u64> {
-        let wallet = self.create_wallet()?;
+        let mut wallet = self.create_wallet()?;
+        wallet = self.sync_wallet()?;
         let balance: Balance = wallet.balance();
         Ok(balance.total().to_sat())
     }
