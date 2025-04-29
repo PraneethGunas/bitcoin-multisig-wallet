@@ -210,7 +210,7 @@ impl MultisigWallet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::secp256k1::{Secp256k1, rand::{self, RngCore}};
+    use bitcoin::{secp256k1::{rand::{self, RngCore}, Secp256k1}};
 
     fn generate_random_xpub() -> ExtendedPubKey {
         let secp = Secp256k1::new();
@@ -222,32 +222,59 @@ mod tests {
 
     #[test]
     fn test_wallet_operations() {
-        // Generate 3 random xpubs for testing
-        let xpubs = vec![
-            generate_random_xpub(),
-            generate_random_xpub(),
-            generate_random_xpub(),
-        ];
+        use serde_json::json;
+        use std::fs;
+        use bip39::{Mnemonic};
+    
+        // Generate 3 random xpubs and their corresponding seeds for testing
+        let mut secrets = Vec::new();
+        let xpubs = (0..3)
+            .map(|_| {
+                let secp = Secp256k1::new();
+                let mut seed = [0u8; 32];
+                rand::thread_rng().fill_bytes(&mut seed);
+                let xprv = bitcoin::bip32::ExtendedPrivKey::new_master(Network::Testnet, &seed).unwrap();
+                let xpub = ExtendedPubKey::from_priv(&secp, &xprv);
+    
+                // Convert the seed to a mnemonic
+                let mnemonic = Mnemonic::from_entropy(&seed).unwrap();
 
+                // Save the seed and xpub as a secret
+                secrets.push(json!({
+                    "seed": mnemonic.to_string(),
+                    "xpub": xpub.to_string(),
+                }));
+    
+                xpub
+            })
+            .collect::<Vec<_>>();
+    
+        // Save secrets to keys.json (overwrite the file)
+        let keys_file = "keys.json";
+        let secrets_json = json!(secrets);
+        fs::write(keys_file, serde_json::to_string_pretty(&secrets_json).unwrap())
+            .expect("Failed to write secrets to keys.json");
+    
+        println!("Keys saved to {}: {}", keys_file, secrets_json);
         // Test wallet creation with 2-of-3 multisig
         let wallet = MultisigWallet::new(xpubs, 2, Network::Testnet).unwrap();
         println!("Created wallet with descriptor: {}", wallet.descriptor);
-
+    
         // Test saving the wallet
         wallet.save().unwrap();
         println!("Saved wallet to: {}", wallet.wallet_path.display());
-
+    
         // Test loading the wallet
         let loaded_wallet = MultisigWallet::load(wallet.wallet_path.clone()).unwrap();
         assert_eq!(wallet.descriptor, loaded_wallet.descriptor);
         assert_eq!(wallet.network, loaded_wallet.network);
         println!("Successfully loaded wallet");
-
+    
         // Test getting a new address
         let address = wallet.get_new_address().unwrap();
         println!("Generated new address: {}", address);
         assert!(address.to_string().starts_with("tb1")); // Testnet bech32 starts with tb1
-
+    
         // Test getting balance (should be 0 since this is a new wallet)
         let balance = wallet.get_balance().unwrap();
         println!("Wallet balance: {} sats", balance);

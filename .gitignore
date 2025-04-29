@@ -1,3 +1,6 @@
 /target
 .qodo
 .env
+
+# Local keys
+keys.json

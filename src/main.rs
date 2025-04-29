@@ -132,13 +132,35 @@ fn main() -> Result<()> {
                 get_network_from_env()?
             };
 
-            let keygen = KeyGenerator::new(network)?;
-            let keys = keygen.list_keys()?;
-            println!("Found {} keys:", keys.len());
-            for (i, key) in keys.iter().enumerate() {
+            use std::fs;
+            use serde_json::Value;
+
+            // Define the path to the keys.json file
+            let keys_file = "keys.json";
+
+            // Check if the file exists
+            if !std::path::Path::new(keys_file).exists() {
+                return Err(anyhow!("keys.json file not found. No keys to list."));
+            }
+
+            // Read and parse the keys.json file
+            let keys_data = fs::read_to_string(keys_file)?;
+            let keys: Value = serde_json::from_str(&keys_data)?;
+
+            // Ensure the keys are an array
+            if !keys.is_array() {
+                return Err(anyhow!("Invalid keys.json format. Expected an array of keys."));
+            }
+
+            // List the keys
+            let keys_array = keys.as_array().unwrap();
+            println!("Found {} keys:", keys_array.len());
+            for (i, key) in keys_array.iter().enumerate() {
+                let xpub = key.get("xpub").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                let mnemonic = key.get("mnemonic").and_then(|v| v.as_str()).unwrap_or("Unknown");
                 println!("Key {}:", i + 1);
-                println!("  XPub: {}", key.xpub);
-                println!("  Fingerprint: {}", key.fingerprint);
+                println!("  XPub: {}", xpub);
+                println!("  Mnemonic: {}", mnemonic);
             }
         }
         Commands::CreateWallet { network, threshold, xpubs } => {
