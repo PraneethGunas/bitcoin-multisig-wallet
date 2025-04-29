@@ -82,6 +82,12 @@ enum Commands {
         #[arg(short, long)]
         wallet: Option<PathBuf>,
     },
+    /// List wwallet transactions
+    ListTransactions {
+        /// Path to the wallet file
+        #[arg(short, long)]
+        wallet: Option<PathBuf>,
+    },
     /// Run test program
     Test,
 }
@@ -171,6 +177,11 @@ fn main() -> Result<()> {
             let balance = wallet.get_balance()?;
             println!("Balance: {} sats", balance);
         }
+        Commands::ListTransactions { wallet } => {
+            let wallet_path = wallet.unwrap_or_else(|| get_wallet_dir().join("wallet.json"));
+            let wallet = MultisigWallet::load(wallet_path)?;
+            wallet.list_transactions()?;
+        }
         Commands::Test => {
             let network = get_network_from_env()?;
             println!("\n1. Generating key 1...");
@@ -201,6 +212,9 @@ fn main() -> Result<()> {
             println!("\nGetting wallet balance...");
             let balance = wallet.get_balance()?;
             println!("Balance: {} sats", balance);
+
+            println!("\nListing transactions...");
+            wallet.list_transactions()?;
             
             println!("\n5. Testing wallet persistence...");
             println!("Saving wallet...");

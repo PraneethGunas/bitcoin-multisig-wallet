@@ -6,10 +6,7 @@ use bitcoin::{
     bip32::ExtendedPubKey,
 };
 use bdk_wallet::{
-    Wallet,
-    descriptor::{Descriptor, DescriptorPublicKey},
-    Balance, KeychainKind, CreateParams,
-    bitcoin as bdk_bitcoin,
+    bitcoin as bdk_bitcoin, descriptor::{Descriptor, DescriptorPublicKey}, Balance, CreateParams, KeychainKind, Wallet, WalletTx
 };
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -123,32 +120,73 @@ impl MultisigWallet {
 
     pub fn sync_wallet(&self) -> Result<(Wallet)> {
         let mut wallet = self.create_wallet()?;
+        let client_url = match self.network {
+            Network::Bitcoin => "https://blockstream.info/api/",
+            Network::Testnet => "https://blockstream.info/testnet/api/",
+            Network::Signet => "https://mempool.space/signet/api/", // Example Signet URL, adjust if needed
+             _ => return Err(anyhow!("Unsupported network for public Esplora: {:?}", self.network)),
+        };
+        println!("Syncing wallet using Esplora endpoint: {}", client_url);
+
         // Create the Esplora client
-        let client: esplora_client::BlockingClient = Builder::new("https://blockstream.info/testnet/api/").build_blocking();
-        // Full scan the wallet
+        let client: esplora_client::BlockingClient = Builder::new(client_url).build_blocking();
+
+        // Full scan the wallet - this might be intensive for large wallets,
+        // consider sync only if state is persisted. For this example, full scan is simple.
+        println!("Starting full scan...");
         let full_scan_request: FullScanRequestBuilder<KeychainKind> = wallet.start_full_scan();
         let full_scan_response: FullScanResponse<KeychainKind> =
             client.full_scan(full_scan_request, STOP_GAP, PARALLEL_REQUESTS)?;
-
+        println!("Full scan finished. Applying update...");
         // Apply the full scan response to the wallet
         wallet.apply_update(full_scan_response)?;
+        println!("Full scan update applied.");
 
-        // Sync the wallet
+
+        // Sync the wallet (after full scan, this gets subsequent changes)
+        // Syncing with revealed SPKs is efficient after an initial scan or if state is loaded
+        println!("Starting sync...");
         let sync_request: SyncRequestBuilder<(KeychainKind, u32)> =
             wallet.start_sync_with_revealed_spks();
-
         let sync_response: SyncResponse = client.sync(sync_request, PARALLEL_REQUESTS)?;
-
+        println!("Sync finished. Applying update...");
         // Apply the sync response to the wallet
         wallet.apply_update(sync_response)?;
+        println!("Sync update applied.");
+
         Ok(wallet)
     }
 
     pub fn get_balance(&self) -> Result<u64> {
-        let mut wallet = self.create_wallet()?;
-        wallet = self.sync_wallet()?;
-        let balance: Balance = wallet.balance();
+        let synced_wallet = self.sync_wallet()?;
+        let balance: Balance = synced_wallet.balance();
+        println!("Wallet Balance: confirmed={}, immature={}, trusted_pending={}, untrusted_pending={}",
+            balance.confirmed.to_sat(),
+            balance.immature.to_sat(),
+            balance.trusted_pending.to_sat(),
+            balance.untrusted_pending.to_sat()
+        );
         Ok(balance.total().to_sat())
+    }
+
+    pub fn list_transactions(&self) -> Result<()> {
+        println!("Syncing wallet before fetching transactions...");
+        // Sync the wallet to get the latest transaction data. This can fail.
+        let synced_wallet = self.sync_wallet()?;
+        println!("Wallet synced. Listing transactions using transactions()...");
+
+        let tx_iterator = synced_wallet.transactions(); // Returns iterator
+        let transactions: Vec<WalletTx> = tx_iterator.collect(); // Collect into Vec<WalletTx>
+
+        println!("Found {} transactions", transactions.len());
+        // Process the Vec<WalletTx> here
+        for wallet_tx in transactions {
+            println!("{} TXID: {} at {}", wallet_tx.chain_position.is_confirmed(), wallet_tx.tx_node.txid, wallet_tx.tx_node.lock_time);
+            // access wallet_tx.details.received, .sent, .fee etc.
+            // access wallet_tx.chain_position.confirmation_time() etc.
+        }
+        println!("Transactions listed successfully.");
+        Ok(())
     }
 
     fn create_wallet(&self) -> Result<Wallet> {
