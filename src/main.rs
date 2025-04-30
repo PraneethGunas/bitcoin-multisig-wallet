@@ -88,6 +88,11 @@ enum Commands {
         #[arg(short, long)]
         wallet: Option<PathBuf>,
     },
+    DRYRUN {
+        /// Network (bitcoin, testnet, regtest). Defaults to value from .env file
+        #[arg(short, long)]
+        network: Option<String>,
+    },
     /// Run test program
     Test,
 }
@@ -243,7 +248,46 @@ fn main() -> Result<()> {
             wallet.save()?;
             println!("Wallet saved successfully!");
         }
-    }
+        Commands::DRYRUN { network } => {
+            use serde_json::json;
+            use std::fs;
+            use bitcoin_multisig_wallet::utilities::generate_random_xpub_and_mnemonic;
 
+            let network = Network::Testnet;
+            let mut secrets = Vec::new();
+            let mut xpubs = Vec::new();
+
+            for _ in 0..3 {
+                let (xpub, mnemonic) = generate_random_xpub_and_mnemonic(network);
+                xpubs.push(xpub);
+                secrets.push(json!({
+                    "xpub": xpub.to_string(),
+                    "mnemonic": mnemonic,
+                }));
+            }
+
+            let secrets_json = json!(secrets);
+            let keys_file = "keys.json";
+            fs::write(keys_file, serde_json::to_string_pretty(&secrets_json).unwrap())
+                .expect("Failed to write keys.json");
+            println!("Saved keys to {}", keys_file);
+
+            let wallet = MultisigWallet::new(xpubs, 2, network).unwrap();
+            wallet.save().expect("Failed to save wallet");
+            println!("Wallet saved to {}", wallet.wallet_path.display());
+
+            let addr = wallet.get_new_address().unwrap();
+            println!("New address: {}", addr);
+
+            let balance = wallet.get_balance().unwrap();
+            println!("Balance: {} sats", balance);
+
+            // log keys and wallet details
+            println!("Keys: {:?}", secrets);
+            println!("Wallet Descriptor: {}", wallet.descriptor);
+            println!("Wallet Path: {}", wallet.wallet_path.display());
+            println!("Wallet Network: {:?}", wallet.network);
+        }
+    }
     Ok(())
 }
