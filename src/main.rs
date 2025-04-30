@@ -91,7 +91,7 @@ enum Commands {
     DRYRUN {
         /// Network (bitcoin, testnet, regtest). Defaults to value from .env file
         #[arg(short, long)]
-        network: Option<String>,
+        network_str: Option<String>,
     },
     /// Run test program
     Test,
@@ -248,44 +248,55 @@ fn main() -> Result<()> {
             wallet.save()?;
             println!("Wallet saved successfully!");
         }
-        Commands::DRYRUN { network } => {
+        Commands::DRYRUN { network_str } => {
             use serde_json::json;
             use std::fs;
-            use bitcoin_multisig_wallet::utilities::generate_random_xpub_and_mnemonic;
+            use bitcoin_multisig_wallet::{utilities::{generate_random_xpub_and_mnemonic, get_network_from_string}, beacon::{derive_beacon_keys, create_beacon_address}};
 
-            let network = Network::Testnet;
-            let mut secrets = Vec::new();
-            let mut xpubs = Vec::new();
+            let network = get_network_from_string(&network_str.unwrap_or_else(|| "testnet".to_string()))?;
+            let keys: Vec<_> = (0..3)
+                .map(|_| generate_random_xpub_and_mnemonic(network))
+                .collect();
 
-            for _ in 0..3 {
-                let (xpub, mnemonic) = generate_random_xpub_and_mnemonic(network);
-                xpubs.push(xpub);
-                secrets.push(json!({
-                    "xpub": xpub.to_string(),
-                    "mnemonic": mnemonic,
-                }));
-            }
+            let [(xpub1, mnemonic1, k1), (xpub2, mnemonic2, k2), (xpub3, mnemonic3, k3)] = keys.as_slice() else {
+                panic!("Expected exactly 3 key tuples");
+            };
 
-            let secrets_json = json!(secrets);
-            let keys_file = "keys.json";
-            fs::write(keys_file, serde_json::to_string_pretty(&secrets_json).unwrap())
+            // Build xpubs list and secrets JSON
+            let xpubs = vec![xpub1.clone(), xpub2.clone(), xpub3.clone()];
+            let secrets = vec![
+                json!({ "xpub": xpub1.to_string(), "mnemonic": mnemonic1, "publicKey": k1.to_string() }),
+                json!({ "xpub": xpub2.to_string(), "mnemonic": mnemonic2, "publicKey": k2.to_string() }),
+                json!({ "xpub": xpub3.to_string(), "mnemonic": mnemonic3, "publicKey": k3.to_string() }),
+            ];
+
+            fs::write("keys.json", serde_json::to_string_pretty(&secrets).unwrap())
                 .expect("Failed to write keys.json");
-            println!("Saved keys to {}", keys_file);
+            println!("Saved keys to keys.json");
 
             let wallet = MultisigWallet::new(xpubs, 2, network).unwrap();
             wallet.save().expect("Failed to save wallet");
-            println!("Wallet saved to {}", wallet.wallet_path.display());
 
             let addr = wallet.get_new_address().unwrap();
-            println!("New address: {}", addr);
-
             let balance = wallet.get_balance().unwrap();
+
+            println!("Wallet saved to: {}", wallet.wallet_path.display());
+            println!("New address: {}", addr);
             println!("Balance: {} sats", balance);
 
-            // log keys and wallet details
-            println!("Keys: {:?}", secrets);
+            let (tweaked_pub_key_12, tweaked_pub_key_21) = derive_beacon_keys(k1, k2).unwrap();
+            let (tweaked_pub_key_13, tweaked_pub_key_31) = derive_beacon_keys(k1, k3).unwrap();
+            let (tweaked_pub_key_23, tweaked_pub_key_32) = derive_beacon_keys(k2, k3).unwrap();
+
+            let beacon_address_12 = create_beacon_address(&tweaked_pub_key_12, &tweaked_pub_key_21, network).unwrap();
+            let beacon_address_13 = create_beacon_address(&tweaked_pub_key_13, &tweaked_pub_key_31, network).unwrap();
+            let beacon_address_23 = create_beacon_address(&tweaked_pub_key_23, &tweaked_pub_key_32, network).unwrap();
+
+            println!("Beacon Address 12: {}", beacon_address_12);
+            println!("Beacon Address 13: {}", beacon_address_13);
+            println!("Beacon Address 23: {}", beacon_address_23);
+            
             println!("Wallet Descriptor: {}", wallet.descriptor);
-            println!("Wallet Path: {}", wallet.wallet_path.display());
             println!("Wallet Network: {:?}", wallet.network);
         }
     }
