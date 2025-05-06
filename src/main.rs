@@ -1,10 +1,11 @@
 use anyhow::{Result, anyhow};
-use bitcoin::{Network, bip32::ExtendedPubKey};
+use bitcoin::Address;
+use bitcoin::{Network, bip32::Xpub};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::str::FromStr;
 use dotenv::dotenv;
-use std::env;
+use std::{env, fs};
 use dirs;
 
 mod keygen;
@@ -88,11 +89,14 @@ enum Commands {
         #[arg(short, long)]
         wallet: Option<PathBuf>,
     },
-    DRYRUN {
+    DRYRUN_1 {
         /// Network (bitcoin, testnet, regtest). Defaults to value from .env file
         #[arg(short, long)]
         network_str: Option<String>,
     },
+
+    DRYRUN_2,
+    
     /// Run test program
     Test,
 }
@@ -182,9 +186,9 @@ fn main() -> Result<()> {
 
             let threshold = threshold.unwrap_or_else(get_default_threshold);
             
-            let xpub_keys: Result<Vec<ExtendedPubKey>> = xpubs
+            let xpub_keys: Result<Vec<Xpub>> = xpubs
                 .iter()
-                .map(|x| ExtendedPubKey::from_str(x).map_err(|e| anyhow!("Invalid xpub: {}", e)))
+                .map(|x| Xpub::from_str(x).map_err(|e| anyhow!("Invalid xpub: {}", e)))
                 .collect();
 
             let wallet = MultisigWallet::new(xpub_keys?, threshold, network)?;
@@ -225,9 +229,9 @@ fn main() -> Result<()> {
             
             println!("\n3. Creating 2-of-3 multisig wallet...");
             let xpubs = vec![
-                ExtendedPubKey::from_str(&key1.xpub)?,
-                ExtendedPubKey::from_str(&key2.xpub)?,
-                ExtendedPubKey::from_str(&key3.xpub)?,
+                Xpub::from_str(&key1.xpub)?,
+                Xpub::from_str(&key2.xpub)?,
+                Xpub::from_str(&key3.xpub)?,
             ];
             let wallet = MultisigWallet::new(xpubs, get_default_threshold(), network)?;
             
@@ -248,7 +252,7 @@ fn main() -> Result<()> {
             wallet.save()?;
             println!("Wallet saved successfully!");
         }
-        Commands::DRYRUN { network_str } => {
+        Commands::DRYRUN_1 { network_str } => {
             use serde_json::json;
             use std::fs;
             use bitcoin_multisig_wallet::{utilities::{generate_random_xpub_and_mnemonic, get_network_from_string}, beacon::{derive_beacon_keys, create_beacon_address}};
@@ -295,9 +299,37 @@ fn main() -> Result<()> {
             println!("Beacon Address 12: {}", beacon_address_12);
             println!("Beacon Address 13: {}", beacon_address_13);
             println!("Beacon Address 23: {}", beacon_address_23);
+
+            let beacon_addresses = vec![
+                json!({ "beacon_address_12": beacon_address_12.to_string() }),
+                json!({ "beacon_address_13": beacon_address_13.to_string() }),
+                json!({ "beacon_address_23": beacon_address_23.to_string() }),
+            ];
+
+            fs::write("beacon.json", serde_json::to_string_pretty(&beacon_addresses).unwrap())
+                .expect("Failed to write beacon addresses.json");
             
             println!("Wallet Descriptor: {}", wallet.descriptor);
             println!("Wallet Network: {:?}", wallet.network);
+        }
+
+        Commands::DRYRUN_2 { } => {
+            use serde_json::Value;
+            let wallet = MultisigWallet::load(get_wallet_dir().join("wallet.json"))?;
+            
+            let balance = wallet.get_balance().unwrap();
+            println!("Wallet balance: {} sats", balance);
+            
+            let json = fs::read_to_string("./beacon.json")?;
+            let beacon_addresses:Value = serde_json::from_str(&json)?;
+            let beacon_addresses = beacon_addresses.as_array().unwrap();
+            let beacon_address_12 = beacon_addresses[0].get("beacon_address_12").and_then(|v| v.as_str()).unwrap_or("Unknown");
+            let beacon_address_13 = beacon_addresses[1].get("beacon_address_13").and_then(|v| v.as_str()).unwrap_or("Unknown");
+            let beacon_address_23 = beacon_addresses[2].get("beacon_address_23").and_then(|v| v.as_str()).unwrap_or("Unknown");
+
+            let psbt1 = wallet.create_opreturn_transaction(Address::from_str(beacon_address_12).unwrap().assume_checked());
+            let psbt2 = wallet.create_opreturn_transaction(Address::from_str(beacon_address_13).unwrap().assume_checked());
+            let psbt3 = wallet.create_opreturn_transaction(Address::from_str(beacon_address_23).unwrap().assume_checked());
         }
     }
     Ok(())
