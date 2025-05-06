@@ -1,8 +1,7 @@
 use anyhow::{anyhow, Result};
-use bitcoin::{Address, Network, bip32::ExtendedPubKey};
+use bitcoin::{bip32::Xpub, Address, Amount, Network, Psbt};
 use bdk_wallet::{
-    bitcoin as bdk_bitcoin, descriptor::{Descriptor, DescriptorPublicKey},
-    CreateParams, KeychainKind, Wallet, WalletTx
+    bitcoin as bdk_bitcoin, descriptor::{Descriptor, DescriptorPublicKey}, CreateParams, KeychainKind, Wallet, WalletTx
 };
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, str::FromStr};
@@ -21,7 +20,7 @@ pub struct MultisigWallet {
 }
 
 impl MultisigWallet {
-    pub fn new(xpubs: Vec<ExtendedPubKey>, threshold: usize, network: Network) -> Result<Self> {
+    pub fn new(xpubs: Vec<Xpub>, threshold: usize, network: Network) -> Result<Self> {
         let desc_str = Self::descriptor_from_xpubs(xpubs, threshold)?;
         let desc = Descriptor::<DescriptorPublicKey>::from_str(&desc_str)?;
         let descriptor = desc.to_string();
@@ -35,7 +34,7 @@ impl MultisigWallet {
         Ok(Self { descriptor, network, wallet_path })
     }
 
-    fn descriptor_from_xpubs(xpubs: Vec<ExtendedPubKey>, threshold: usize) -> Result<String> {
+    fn descriptor_from_xpubs(xpubs: Vec<Xpub>, threshold: usize) -> Result<String> {
         if threshold > xpubs.len() {
             return Err(anyhow!("Threshold cannot exceed number of keys"));
         }
@@ -131,5 +130,31 @@ impl MultisigWallet {
             // access wallet_tx.chain_position.confirmation_time() etc.
         }
         Ok(())
+    }
+
+    pub fn create_opreturn_transaction(&self, send_address:Address) -> Result<Psbt> {
+        let mut wallet = self.sync_wallet()?;
+    
+        // Use a dummy address to send change (could also be same wallet)
+        let change_address = wallet.next_unused_address(KeychainKind::Internal);
+
+        println!("{}", self.descriptor);
+    
+        let mut data = [0u8; 76]; // Initialize with zeros
+        let bytes = self.descriptor.as_bytes();
+
+        println!("Descriptor bytes: {:?}", bytes);
+
+        // Copy the bytes into the fixed-size array
+        data[..bytes.len()].copy_from_slice(bytes);
+        println!("Data bytes: {:?}", data);
+
+        let mut tx_builder = wallet.build_tx();
+        tx_builder.add_recipient(send_address.script_pubkey(), Amount::from_sat(546));
+        tx_builder.add_data(&data);
+        tx_builder.drain_to(change_address.script_pubkey()); // drain remaining funds to change
+    
+        let psbt: bitcoin::Psbt = tx_builder.finish()?;
+        Ok(psbt)
     }
 }
